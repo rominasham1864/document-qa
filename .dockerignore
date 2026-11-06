@@ -1,0 +1,15 @@
+# Keep local secrets, Windows venv, and generated data out of the image.
+.env
+.venv/
+__pycache__/
+*.py[cod]
+.git/
+.vscode/
+.idea/
+.pytest_cache/
+*.sqlite3
+*.sqlite3-*
+data/
+media/
+staticfiles/
+chroma_data/
