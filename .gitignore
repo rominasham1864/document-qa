@@ -1,0 +1,21 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Secrets and local data
+.env
+*.sqlite3
+*.sqlite3-*
+media/
+staticfiles/
+chroma_data/
+data/
+
+# IDE
+.vscode/
+.idea/
+
+# Misc
+.DS_Store
