@@ -10,7 +10,7 @@ class DocumentAdmin(admin.ModelAdmin):
     """Manage documents without editing automatically generated metadata."""
 
     list_display = ("id", "title", "file", "created_at", "updated_at")
-0    search_fields = ("title",)
+    search_fields = ("title",)
     list_filter = ("created_at",)
     ordering = ("-created_at",)
     list_per_page = 25
