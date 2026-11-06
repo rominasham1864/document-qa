@@ -5,6 +5,8 @@ services:
       - .env
     environment:
       DJANGO_DB_PATH: /app/data/db.sqlite3
+      HF_HOME: /root/.cache/huggingface
+      HF_HUB_OFFLINE: "1"
     command: sh -c "python manage.py migrate --noinput && exec python manage.py runserver 0.0.0.0:8000"
     ports:
       - "127.0.0.1:8000:8000"
@@ -14,7 +16,9 @@ services:
       # Keep Docker data independent of the Windows SQLite database.
       - sqlite_data:/app/data
       - media_data:/app/media
+      - hf_models:/root/.cache/huggingface
 
 volumes:
   sqlite_data:
   media_data:
+  hf_models:
