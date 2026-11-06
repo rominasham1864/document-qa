@@ -7,6 +7,7 @@ services:
       DJANGO_DB_PATH: /app/data/db.sqlite3
       HF_HOME: /root/.cache/huggingface
       HF_HUB_OFFLINE: "1"
+      CHROMA_PERSIST_DIRECTORY: /app/chroma_data
     command: sh -c "python manage.py migrate --noinput && exec python manage.py runserver 0.0.0.0:8000"
     ports:
       - "127.0.0.1:8000:8000"
@@ -17,8 +18,10 @@ services:
       - sqlite_data:/app/data
       - media_data:/app/media
       - hf_models:/root/.cache/huggingface
+      - chroma_data:/app/chroma_data
 
 volumes:
   sqlite_data:
   media_data:
   hf_models:
+  chroma_data:
