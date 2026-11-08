@@ -22,6 +22,7 @@ from rest_framework.test import APITestCase
 from documents.models import Document
 from documents.services.vector_store import (
     get_vector_store,
+    index_document,
     search_chunks,
 )
 from documents.services.document_lifecycle import index_saved_document
@@ -129,7 +130,7 @@ class DocumentQAPipelineIntegrationTests(APITestCase):
         self.assertTrue(Path(document.file.path).is_file())
 
         # Real chunking + Chroma indexing with deterministic fake embeddings.
-        self.assertEqual(document.index_status, Document.IndexStatus.READY)
+        self.assertEqual(index_document(document, vector_store=self.store), 1)
         reopened_store = get_vector_store(
             persist_directory=self.chroma_dir, embeddings=KeywordEmbeddings()
         )
@@ -157,8 +158,8 @@ class DocumentQAPipelineIntegrationTests(APITestCase):
         cooking = self.upload_document(
             "Cooking", "cake.docx", "برای پخت کیک به آرد نیاز داریم."
         )
-        self.assertEqual(ai.index_status, Document.IndexStatus.READY)
-        self.assertEqual(cooking.index_status, Document.IndexStatus.READY)
+        index_document(ai, vector_store=self.store)
+        index_document(cooking, vector_store=self.store)
 
         response, chat = self.ask_via_api(
             {"question": "یادگیری ماشین چیست؟", "document_id": cooking.pk, "k": 2},

@@ -3,6 +3,7 @@
 from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -43,6 +44,13 @@ class DocumentAPITests(APITestCase):
         )
         self.client.force_authenticate(user=self.user)
         self.list_url = reverse("document-list")
+        # Keep existing CRUD tests independent from E5 and Chroma.
+        index_mock = patch("documents.views.index_saved_document", return_value=1)
+        delete_mock = patch("documents.views.delete_document_and_index", side_effect=lambda doc: doc.delete())
+        index_mock.start()
+        delete_mock.start()
+        self.addCleanup(index_mock.stop)
+        self.addCleanup(delete_mock.stop)
 
     def upload(self, title="AI", filename="sample.docx", text="یادگیری ماشین"):
         return self.client.post(

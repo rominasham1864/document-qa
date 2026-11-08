@@ -3,6 +3,7 @@
 from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -40,6 +41,13 @@ class DocumentAdminTests(TestCase):
 
     def setUp(self):
         self.client.force_login(self.admin_user)
+        # Old Admin behavior tests stay offline; task-15 tests exercise real Chroma.
+        index_mock = patch("documents.admin.index_saved_document", return_value=1)
+        delete_mock = patch("documents.admin.delete_document_and_index", side_effect=lambda doc: doc.delete())
+        index_mock.start()
+        delete_mock.start()
+        self.addCleanup(index_mock.stop)
+        self.addCleanup(delete_mock.stop)
 
     def test_document_is_listed_and_searchable(self):
         Document.objects.create(title="Machine Learning", file="documents/ml.docx")
