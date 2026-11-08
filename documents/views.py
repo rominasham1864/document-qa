@@ -1,18 +1,24 @@
 """HTTP endpoints for the document application."""
 
 from openai import RateLimitError
-from rest_framework import status
+from rest_framework import status, viewsets
 from rest_framework.authentication import BasicAuthentication, SessionAuthentication
 from rest_framework.generics import GenericAPIView
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from .serializers import AskQuestionSerializer
+from .models import Document
+from .serializers import (
+    AskQuestionSerializer,
+    DocumentListSerializer,
+    DocumentSerializer,
+)
 from .services.rag import answer_question
 
 
 class AskQuestionView(GenericAPIView):
-    """Answer questions using existing RAG services (no duplicate RAG logic)."""
+    """Answer questions using existing RAG service."""
 
     serializer_class = AskQuestionSerializer
     # Basic auth is for LOCAL CLI tests; use HTTPS for any remote deployment.
@@ -60,3 +66,18 @@ class AskQuestionView(GenericAPIView):
             )
 
         return Response(result, status=status.HTTP_200_OK)
+    
+class DocumentViewSet(viewsets.ModelViewSet):
+    """List, upload, retrieve, partially update and delete DOCX records."""
+
+    queryset = Document.objects.all()
+    authentication_classes = [BasicAuthentication, SessionAuthentication]
+    permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+    http_method_names = ["get", "post", "patch", "delete", "head", "options"]
+
+    def get_serializer_class(self):
+        if self.action == "list":
+            return DocumentListSerializer
+        return DocumentSerializer
+
