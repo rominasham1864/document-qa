@@ -19,3 +19,11 @@ data/
 
 # Misc
 .DS_Store
+
+/rag_quality_report.json
+/rag_quality_review.csv
+/rag_quality_metrics.md
+/data/
+/.cache/
+# Local output/artifacts from optional audits.
+/.pytest_cache/
