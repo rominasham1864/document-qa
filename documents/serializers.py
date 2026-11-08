@@ -2,7 +2,7 @@ from pathlib import Path
 
 from rest_framework import serializers
 
-from .models import Document
+from .models import Document, QuestionAnswer
 from .services.docx_parser import DocumentExtractionError, extract_docx_text
 
 
@@ -65,3 +65,12 @@ class DocumentListSerializer(DocumentSerializer):
 
     class Meta(DocumentSerializer.Meta):
         fields = ("id", "title", "file", "created_at", "updated_at")
+
+
+class QuestionAnswerSerializer(serializers.ModelSerializer):
+    """Expose stored answers without allowing clients to edit history."""
+
+    class Meta:
+        model = QuestionAnswer
+        fields = ("id", "question", "answer", "sources", "created_at")
+        read_only_fields = fields
