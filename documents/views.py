@@ -1,7 +1,10 @@
 """HTTP endpoints for document management and question answering."""
 
+import logging
+
 from openai import RateLimitError
 from rest_framework import status, viewsets
+from rest_framework.exceptions import APIException
 from rest_framework.authentication import BasicAuthentication, SessionAuthentication
 from rest_framework.generics import GenericAPIView
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
@@ -17,10 +20,40 @@ from .serializers import (
     QuestionAnswerSerializer,
 )
 from .services.rag import answer_question
+from .services.document_lifecycle import index_saved_document, delete_document_and_index
+
+logger = logging.getLogger(__name__)
+
+
+class DocumentIndexUnavailable(APIException):
+    """An upload/update was saved, but its search index is not ready."""
+
+    status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+    default_code = "document_index_unavailable"
+
+    def __init__(self, document_id: int):
+        super().__init__({
+            "code": "document_index_unavailable",
+            "document_id": document_id,
+            "message": (
+                "Document saved, but indexing failed. "
+                "Retry with: python manage.py index_document "
+                f"--document-id {document_id}"
+            ),
+        })
+        self.detail["document_id"] = document_id
+
+
+class DocumentDeletionUnavailable(APIException):
+    """Keep the document when removing its Chroma index fails."""
+
+    status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+    default_detail = "Could not delete document: vector index is unavailable."
+    default_code = "document_delete_unavailable"
 
 
 class DocumentViewSet(viewsets.ModelViewSet):
-    """List, upload, retrieve, partially update and delete DOCX records."""
+    """Authenticated CRUD; synchronize indexes on actual document changes."""
 
     queryset = Document.objects.all()
     authentication_classes = [BasicAuthentication, SessionAuthentication]
@@ -32,6 +65,32 @@ class DocumentViewSet(viewsets.ModelViewSet):
         if self.action == "list":
             return DocumentListSerializer
         return DocumentSerializer
+
+    def perform_create(self, serializer):
+        document = serializer.save()
+        self._index_or_report(document)
+
+    def perform_update(self, serializer):
+        before = serializer.instance.file.name
+        changed_fields = serializer.validated_data
+        document = serializer.save()
+        if "title" in changed_fields or "file" in changed_fields:
+            self._index_or_report(document, previous_file_name=before)
+
+    @staticmethod
+    def _index_or_report(document, *, previous_file_name=None):
+        try:
+            index_saved_document(document, previous_file_name=previous_file_name)
+        except Exception as exc:
+            logger.exception("Could not index saved document %s", document.pk)
+            raise DocumentIndexUnavailable(document.pk) from exc
+
+    def perform_destroy(self, instance):
+        try:
+            delete_document_and_index(instance)
+        except Exception as exc:
+            logger.exception("Could not delete document %s and its index", instance.pk)
+            raise DocumentDeletionUnavailable() from exc
 
 
 class HistoryPagination(PageNumberPagination):
@@ -110,4 +169,4 @@ class AskQuestionView(GenericAPIView):
             sources=result["sources"],
         )
         return Response(result, status=status.HTTP_200_OK)
-    
+
