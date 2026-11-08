@@ -18,7 +18,7 @@ class VectorCommandTests(TestCase):
         )
         output = StringIO()
         with patch(
-            "documents.management.commands.index_document.index_document",
+            "documents.management.commands.index_document.index_saved_document",
             return_value=1,
         ) as indexer:
             call_command("index_document", document_id=document.pk, stdout=output)

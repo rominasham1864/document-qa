@@ -22,9 +22,9 @@ from rest_framework.test import APITestCase
 from documents.models import Document
 from documents.services.vector_store import (
     get_vector_store,
-    index_document,
     search_chunks,
 )
+from documents.services.document_lifecycle import index_saved_document
 
 
 class KeywordEmbeddings(Embeddings):
@@ -85,10 +85,16 @@ class DocumentQAPipelineIntegrationTests(APITestCase):
         )
 
     def upload_document(self, title: str, filename: str, text: str) -> Document:
-        response = self.client.post(
-            reverse("admin:documents_document_add"),
-            {"title": title, "file": make_docx_upload(filename, text)},
-        )
+        with patch(
+            "documents.admin.index_saved_document",
+            side_effect=lambda document, **kwargs: index_saved_document(
+                document, **kwargs, vector_store=self.store
+            ),
+        ):
+            response = self.client.post(
+                reverse("admin:documents_document_add"),
+                {"title": title, "file": make_docx_upload(filename, text)},
+            )
         self.assertEqual(response.status_code, 302)
         return Document.objects.get(title=title)
 
@@ -123,7 +129,7 @@ class DocumentQAPipelineIntegrationTests(APITestCase):
         self.assertTrue(Path(document.file.path).is_file())
 
         # Real chunking + Chroma indexing with deterministic fake embeddings.
-        self.assertEqual(index_document(document, vector_store=self.store), 1)
+        self.assertEqual(document.index_status, Document.IndexStatus.READY)
         reopened_store = get_vector_store(
             persist_directory=self.chroma_dir, embeddings=KeywordEmbeddings()
         )
@@ -151,8 +157,8 @@ class DocumentQAPipelineIntegrationTests(APITestCase):
         cooking = self.upload_document(
             "Cooking", "cake.docx", "برای پخت کیک به آرد نیاز داریم."
         )
-        index_document(ai, vector_store=self.store)
-        index_document(cooking, vector_store=self.store)
+        self.assertEqual(ai.index_status, Document.IndexStatus.READY)
+        self.assertEqual(cooking.index_status, Document.IndexStatus.READY)
 
         response, chat = self.ask_via_api(
             {"question": "یادگیری ماشین چیست؟", "document_id": cooking.pk, "k": 2},

@@ -1,13 +1,13 @@
-"""Index one previously uploaded Document in persistent ChromaDB."""
+"""Repair or create a Document's synchronized Chroma index."""
 
 from django.core.management.base import BaseCommand, CommandError
 
 from documents.models import Document
-from documents.services.vector_store import index_document
+from documents.services.document_lifecycle import index_saved_document
 
 
 class Command(BaseCommand):
-    help = "Create/update Chroma chunks for a Document with extracted_text."
+    help = "Create/retry an index and update its SQLite READY/FAILED state."
 
     def add_arguments(self, parser):
         parser.add_argument("--document-id", type=int, required=True)
@@ -18,11 +18,13 @@ class Command(BaseCommand):
             document = Document.objects.get(pk=document_id)
         except Document.DoesNotExist as exc:
             raise CommandError(f"Document {document_id} was not found in SQLite.") from exc
-
         try:
-            count = index_document(document)
-        except ValueError as exc:
-            raise CommandError(str(exc)) from exc
+            count = index_saved_document(document)
+        except Exception as exc:
+            raise CommandError(
+                f"Indexing document {document_id} failed ({type(exc).__name__}); "
+                "status is FAILED. Check server logs, then retry."
+            ) from exc
         self.stdout.write(self.style.SUCCESS(
-            f"Indexed Document {document_id}: {count} chunk(s) saved in ChromaDB."
+            f"Document {document_id} READY: {count} chunk(s) indexed."
         ))

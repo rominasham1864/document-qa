@@ -4,6 +4,7 @@ import logging
 
 from openai import RateLimitError
 from rest_framework import status, viewsets
+from rest_framework.decorators import action
 from rest_framework.exceptions import APIException
 from rest_framework.authentication import BasicAuthentication, SessionAuthentication
 from rest_framework.generics import GenericAPIView
@@ -20,7 +21,9 @@ from .serializers import (
     QuestionAnswerSerializer,
 )
 from .services.rag import answer_question
-from .services.document_lifecycle import index_saved_document, delete_document_and_index
+from .services.document_lifecycle import (
+    index_saved_document, delete_document_and_index, get_index_snapshot,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +44,7 @@ class DocumentIndexUnavailable(APIException):
                 f"--document-id {document_id}"
             ),
         })
+        # APIException converts nested integers to ErrorDetail strings.
         self.detail["document_id"] = document_id
 
 
@@ -71,19 +75,42 @@ class DocumentViewSet(viewsets.ModelViewSet):
         self._index_or_report(document)
 
     def perform_update(self, serializer):
-        before = serializer.instance.file.name
-        changed_fields = serializer.validated_data
-        document = serializer.save()
-        if "title" in changed_fields or "file" in changed_fields:
-            self._index_or_report(document, previous_file_name=before)
+        changed = serializer.validated_data
+        if not ({"title", "file"} & set(changed)):
+            serializer.save()
+            return
+
+        previous = get_index_snapshot(serializer.instance)
+        old_filename = serializer.instance.file.name
+        # The new content and PENDING state are stored in one SQLite write:
+        # search cannot see the old vectors as valid in between.
+        document = serializer.save(
+            index_status=Document.IndexStatus.PENDING,
+            index_key="",
+            index_error="",
+        )
+        self._index_or_report(
+            document, previous_file_name=old_filename, previous_index=previous
+        )
 
     @staticmethod
-    def _index_or_report(document, *, previous_file_name=None):
+    def _index_or_report(document, *, previous_file_name=None, previous_index=None):
         try:
-            index_saved_document(document, previous_file_name=previous_file_name)
+            index_saved_document(
+                document,
+                previous_file_name=previous_file_name,
+                previous_index=previous_index,
+            )
         except Exception as exc:
             logger.exception("Could not index saved document %s", document.pk)
             raise DocumentIndexUnavailable(document.pk) from exc
+
+    @action(detail=True, methods=["post"], url_path="retry-index")
+    def retry_index(self, request, pk=None):
+        """Retry an incomplete index without uploading the DOCX again."""
+        document = self.get_object()
+        self._index_or_report(document)
+        return Response(self.get_serializer(document).data, status=status.HTTP_200_OK)
 
     def perform_destroy(self, instance):
         try:
@@ -162,6 +189,8 @@ class AskQuestionView(GenericAPIView):
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
 
+        # Persist only completed service results (including "no indexed sources").
+        # Validation failures and upstream errors return earlier without a row.
         QuestionAnswer.objects.create(
             user=request.user,
             question=result["question"],
@@ -169,4 +198,3 @@ class AskQuestionView(GenericAPIView):
             sources=result["sources"],
         )
         return Response(result, status=status.HTTP_200_OK)
-

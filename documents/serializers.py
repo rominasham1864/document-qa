@@ -1,3 +1,5 @@
+"""Validate question requests and document uploads for the REST API."""
+
 from pathlib import Path
 
 from rest_framework import serializers
@@ -10,7 +12,7 @@ MAX_DOCX_SIZE = 10 * 1024 * 1024  # 10 MiB; API upload limit
 
 
 class AskQuestionSerializer(serializers.Serializer):
-    """A single question with optional retrieval settings."""
+    """A single question with optional retrieval settings (task 9)."""
 
     question = serializers.CharField(max_length=2000, trim_whitespace=True)
     k = serializers.IntegerField(default=4, min_value=1, max_value=8)
@@ -32,10 +34,12 @@ class DocumentSerializer(serializers.ModelSerializer):
             "title",
             "file",
             "extracted_text",
+            "index_status",
+            "index_error",
             "created_at",
             "updated_at",
         )
-        read_only_fields = ("id", "extracted_text", "created_at", "updated_at")
+        read_only_fields = ("id", "extracted_text", "index_status", "index_error", "created_at", "updated_at")
 
     def validate_file(self, file):
         """Reject bad uploads before Django saves the file or database row."""
@@ -64,7 +68,7 @@ class DocumentListSerializer(DocumentSerializer):
     """Keep large extracted text out of the document listing."""
 
     class Meta(DocumentSerializer.Meta):
-        fields = ("id", "title", "file", "created_at", "updated_at")
+        fields = ("id", "title", "file", "index_status", "created_at", "updated_at")
 
 
 class QuestionAnswerSerializer(serializers.ModelSerializer):

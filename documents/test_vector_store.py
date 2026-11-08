@@ -6,6 +6,7 @@ from django.test import TestCase
 from langchain_core.embeddings import Embeddings
 
 from documents.models import Document
+from documents.services.document_lifecycle import index_saved_document
 from documents.services.vector_store import (
     delete_document_index,
     get_vector_store,
@@ -54,8 +55,8 @@ class VectorStoreTests(TestCase):
     def test_index_and_semantic_search(self):
         cat = self.make_document("Pets - cats", "A cat sleeps on a sofa.")
         dog = self.make_document("Pets - dogs", "A dog plays in a park.")
-        self.assertEqual(index_document(cat, vector_store=self.store), 1)
-        self.assertEqual(index_document(dog, vector_store=self.store), 1)
+        self.assertEqual(index_saved_document(cat, vector_store=self.store), 1)
+        self.assertEqual(index_saved_document(dog, vector_store=self.store), 1)
 
         found = search_chunks("cat", k=1, vector_store=self.store)
         self.assertEqual(len(found), 1)
@@ -69,14 +70,16 @@ class VectorStoreTests(TestCase):
 
     def test_reindex_does_not_duplicate_and_removes_old_chunks(self):
         doc = self.make_document("Old", "cat " * 400)
-        first_count = index_document(doc, vector_store=self.store)
+        first_count = index_saved_document(doc, vector_store=self.store)
         self.assertGreater(first_count, 1)
         self.assertEqual(len(self.indexed_ids(doc)), first_count)
 
         doc.title = "New"
         doc.extracted_text = "A dog is running."
+        doc.index_status = Document.IndexStatus.PENDING
+        doc.index_key = ""
         doc.save()
-        self.assertEqual(index_document(doc, vector_store=self.store), 1)
+        self.assertEqual(index_saved_document(doc, vector_store=self.store), 1)
         self.assertEqual(self.indexed_ids(doc), [f"{doc.pk}:0"])
         found = search_chunks("dog", k=1, vector_store=self.store)
         self.assertEqual(found[0].metadata["title"], "New")
@@ -85,8 +88,8 @@ class VectorStoreTests(TestCase):
     def test_deleting_one_index_preserves_other_documents(self):
         first = self.make_document("First", "cat")
         second = self.make_document("Second", "dog")
-        index_document(first, vector_store=self.store)
-        index_document(second, vector_store=self.store)
+        index_saved_document(first, vector_store=self.store)
+        index_saved_document(second, vector_store=self.store)
 
         self.assertEqual(delete_document_index(first.pk, vector_store=self.store), 1)
         self.assertEqual(self.indexed_ids(first), [])

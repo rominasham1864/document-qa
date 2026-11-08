@@ -38,7 +38,10 @@ def get_vector_store(
     )
 
 
-def index_document(document: Document, *, vector_store: Chroma | None = None) -> int:
+def index_document(
+    document: Document, *, vector_store: Chroma | None = None,
+    index_key: str | None = None,
+) -> int:
     """Upsert current chunks and remove obsolete chunks for just this document.
 
     Re-running is safe: IDs remain stable; chunks of other documents are preserved.
@@ -55,6 +58,9 @@ def index_document(document: Document, *, vector_store: Chroma | None = None) ->
     )
     if not chunks:
         raise ValueError("No chunks were produced for this document.")
+    if index_key is not None:
+        for chunk in chunks:
+            chunk.metadata["index_key"] = index_key
 
     store = vector_store if vector_store is not None else get_vector_store()
     # Fetch IDs only; vectors are not needed for cleaning up stale chunks.
@@ -85,11 +91,23 @@ def search_chunks(
     if document_id is not None and document_id <= 0:
         raise ValueError("document_id must be positive.")
 
-    store = vector_store if vector_store is not None else get_vector_store()
-    kwargs = {"k": k}
+    # The only search-authorized vectors are those whose generation is the
+    # current READY generation in SQLite. This excludes older/partial Chroma
+    # data even when an update fails halfway through.
+    eligible = Document.objects.filter(index_status=Document.IndexStatus.READY).exclude(
+        index_key=""
+    )
     if document_id is not None:
-        kwargs["filter"] = {"document_id": document_id}
-    return store.similarity_search(query.strip(), **kwargs)
+        eligible = eligible.filter(pk=document_id)
+    keys = list(eligible.values_list("index_key", flat=True))
+    if not keys:
+        return []
+
+    store = vector_store if vector_store is not None else get_vector_store()
+    where = {"index_key": keys[0]} if len(keys) == 1 else {
+        "index_key": {"$in": keys}
+    }
+    return store.similarity_search(query.strip(), k=k, filter=where)
 
 
 def delete_document_index(document_id: int, *, vector_store: Chroma | None = None) -> int:

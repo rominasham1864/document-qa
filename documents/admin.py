@@ -8,7 +8,9 @@ from django.core.files.uploadedfile import UploadedFile
 
 from .models import Document
 from .services.docx_parser import DocumentExtractionError, extract_docx_text
-from .services.document_lifecycle import index_saved_document, delete_document_and_index
+from .services.document_lifecycle import (
+    index_saved_document, delete_document_and_index, get_index_snapshot,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -35,39 +37,50 @@ class DocumentAdmin(admin.ModelAdmin):
     """Manage DOCX files and show their automatically extracted text."""
 
     form = DocumentAdminForm
-    list_display = ("id", "title", "file", "created_at", "updated_at")
+    list_display = ("id", "title", "index_status", "file", "created_at", "updated_at")
     list_display_links = ("id", "title")
     search_fields = ("title",)
-    list_filter = ("created_at",)
+    list_filter = ("index_status", "created_at")
     ordering = ("-created_at",)
     list_per_page = 25
-    readonly_fields = ("extracted_text", "created_at", "updated_at")
-    fields = ("title", "file", "extracted_text", "created_at", "updated_at")
+    readonly_fields = ("extracted_text", "index_status", "index_error", "created_at", "updated_at")
+    fields = ("title", "file", "extracted_text", "index_status", "index_error", "created_at", "updated_at")
 
     def save_model(self, request, obj, form, change):
-        # Editing only the title must not reread the DOCX or erase existing text.
-        previous_file_name = None
-        if change:
-            previous_file_name = Document.objects.only("file").get(pk=obj.pk).file.name
+        changed = not change or bool({"title", "file"} & set(form.changed_data))
+        old_filename = None
+        previous = None
+        if change and changed:
+            old = Document.objects.get(pk=obj.pk)
+            old_filename = old.file.name
+            previous = get_index_snapshot(old)
+
         if hasattr(form, "new_extracted_text"):
             obj.extracted_text = form.new_extracted_text
+        if changed:
+            # Store data and invalidation together. Never serve a stale vector
+            # after SQLite has already accepted a new document title or file.
+            obj.index_status = Document.IndexStatus.PENDING
+            obj.index_key = ""
+            obj.index_error = ""
         super().save_model(request, obj, form, change)
 
-        # Skip unrelated edits; metadata changes (title) also need reindexing.
-        if not change or {"title", "file"} & set(form.changed_data):
+        if changed:
             try:
-                count = index_saved_document(obj, previous_file_name=previous_file_name)
+                count = index_saved_document(
+                    obj, previous_file_name=old_filename, previous_index=previous
+                )
             except Exception:
                 logger.exception("Could not index saved document %s", obj.pk)
                 self.message_user(
                     request,
-                    f"Document {obj.pk} was saved but NOT indexed. "
+                    f"Document {obj.pk} was saved, but is NOT searchable. "
                     f"Retry: python manage.py index_document --document-id {obj.pk}",
                     level=messages.WARNING,
                 )
             else:
                 self.message_user(
-                    request, f"Document indexed: {count} chunk(s).", level=messages.INFO
+                    request, f"Document is READY: {count} chunk(s).", level=messages.INFO
                 )
 
     def delete_model(self, request, obj):

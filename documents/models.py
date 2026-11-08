@@ -1,4 +1,4 @@
-"""Database models for uploaded documents."""
+"""Database models for uploaded documents and question-answer history."""
 
 from django.conf import settings
 from django.core.validators import FileExtensionValidator
@@ -15,6 +15,23 @@ class Document(models.Model):
         validators=[FileExtensionValidator(allowed_extensions=["docx"])],
     )
     extracted_text = models.TextField(blank=True)
+    class IndexStatus(models.TextChoices):
+        PENDING = "pending", "Pending"
+        PROCESSING = "processing", "Processing"
+        READY = "ready", "Ready"
+        FAILED = "failed", "Failed"
+
+    index_status = models.CharField(
+        max_length=12, choices=IndexStatus.choices, default=IndexStatus.PENDING
+    )
+    # Only index_key on a READY row is eligible for retrieval.
+    index_key = models.CharField(max_length=80, blank=True, default="")
+    indexed_content_hash = models.CharField(max_length=64, blank=True, default="")
+    indexed_title = models.CharField(max_length=255, blank=True, default="")
+    indexed_chunk_count = models.PositiveIntegerField(default=0)
+    index_error = models.CharField(max_length=120, blank=True, default="")
+    index_attempt = models.CharField(max_length=32, blank=True, default="")
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -23,7 +40,8 @@ class Document(models.Model):
 
     def __str__(self):
         return self.title
-    
+
+
 class QuestionAnswer(models.Model):
     """One user's question, generated answer, and source snapshots."""
 
@@ -44,4 +62,3 @@ class QuestionAnswer(models.Model):
 
     def __str__(self):
         return self.question[:80]
-
