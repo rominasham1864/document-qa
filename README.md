@@ -1,351 +1,173 @@
-# Document QA — Retrieval-Augmented Question Answering
+# Document QA — Multilingual Document Question Answering with RAG
 
-A document-based question-answering system built with **Django** and **LangChain**. Users can upload Microsoft Word documents (`.docx`), search their contents semantically, and ask natural-language questions. The system is designed to retrieve relevant passages and use a language model to generate answers grounded in the uploaded documents.
+[فارسی / Persian README](README_FA.md)
 
-The project prioritizes **readability, modularity, and ease of deployment** over unnecessary complexity. Django Admin provides the management interface, and REST APIs provide programmatic access; a separate frontend is not required.
+**A Django-based Retrieval-Augmented Generation (RAG) application that turns Word documents into a searchable knowledge base and answers natural-language questions with source references.**
 
-> **Project status:** Work in progress. This README describes the complete intended system. The current checkout may not yet implement every feature or endpoint listed under **Planned Features** and **Proposed API**. Refer to the code and tests for currently available functionality.
+Built as an end-to-end **AI engineering internship project**, with a focus on modular services, document processing, semantic retrieval, API design, failure recovery, and reproducible evaluation. The main use case is **Persian-language question answering**, while the embedding model supports multilingual queries.
 
-## What Problem Does It Solve?
+> **Project scope:** a working local-development/demo application, not a production-hosted service. Django Admin provides the management interface; no separate frontend is required.
 
-Finding an answer in a long collection of Word documents can be slow and frustrating. Traditional keyword search may miss relevant sections when a question uses different wording from the source text.
+## At a glance
 
-Document QA uses **Retrieval-Augmented Generation (RAG)** to:
-
-1. Extract text from uploaded Word documents.
-2. Split the text into smaller, searchable passages.
-3. Convert passages into vector representations (embeddings).
-4. Retrieve passages most relevant to the user's question.
-5. Send the question and retrieved context to a language model.
-6. Return a grounded answer with references to the source documents.
-
-The language model is **not trained or fine-tuned** on the uploaded files. Instead, relevant document content is provided to the model at question-answering time.
-
-## Planned Features
-
-- **Document management:** Upload, list, inspect, update, and delete `.docx` documents.
-- **Text extraction:** Extract and store document text for processing and auditing.
-- **Semantic search:** Find related passages even when the question and document use different wording.
-- **Document-grounded answers:** Generate answers using retrieved passages instead of relying only on general model knowledge.
-- **Source references:** Include the documents and passages used to answer each question.
-- **Question history:** Store past questions, answers, references, and timestamps.
-- **REST API:** Make document management, Q&A, and history accessible through HTTP endpoints.
-- **Django Admin:** Manage documents and review questions without a separate frontend.
-- **Docker support:** Run the application in a reproducible development environment.
-- **Error handling and tests:** Handle invalid uploads, empty documents, failed model requests, and other expected errors.
-
-## Technology Stack
-
-| Layer | Technology | Purpose |
-| --- | --- | --- |
-| Language | Python 3.11 | Application language |
-| Web framework | Django 5.2 LTS | Application structure, data models, Admin, authentication |
-| REST API | Django REST Framework *(planned)* | HTTP endpoints and serializers |
-| Relational database | SQLite | Document metadata and question history |
-| Word processing | `python-docx` *(planned)* | `.docx` text extraction |
-| RAG orchestration | LangChain *(planned)* | Connect splitting, retrieval, prompts, and the language model |
-| Embedding model | `intfloat/multilingual-e5-small` *(planned)* | Multilingual text embeddings |
-| Vector database | ChromaDB *(planned)* | Semantic indexing and similarity search |
-| LLM provider | OpenRouter *(planned)* | API access to a configurable language model |
-| Deployment | Docker + Docker Compose | Reproducible local development |
-
-**Why these choices?** The stack is intentionally small: SQLite is sufficient for an initial single-instance application, ChromaDB provides a simple local vector store, and OpenRouter avoids hosting a large language model locally. The chosen free model, if available, can be configured through an environment variable; free-model availability and request limits may change.
+| What it does | How it works |
+| --- | --- |
+| Document management | Upload, inspect, replace, and delete `.docx` files from Django Admin or an authenticated REST API |
+| Text extraction | Read paragraphs and tables with `python-docx` and store extracted content in SQLite |
+| Semantic search | Split text into overlapping chunks, embed with local `intfloat/multilingual-e5-small`, and index in ChromaDB |
+| Grounded Q&A | Retrieve relevant chunks and generate an answer using a configurable OpenRouter LLM |
+| Source attribution | Return the document/chunk references used to construct the answer |
+| Q&A history | Store successful question–answer interactions and let users view their own history |
+| Index reliability | Track `pending`, `processing`, `ready`, and `failed` states; retry failed indexing; exclude stale indexes from search |
+| Quality checks | Run Django tests, offline retrieval evaluation, optional LLM evaluation, and human answer review |
 
 ## Architecture
 
 ```mermaid
-flowchart TD
-    A["Django Admin / REST API"] --> B["Document service"]
-    B --> C["DOCX text extraction"]
-    C --> D["Chunking"]
-    D --> E["Embedding model"]
-    E --> F[("ChromaDB")]
-    B --> G[("SQLite")]
-
-    Q["User question"] --> R["Question API"]
-    R --> S["Semantic retrieval"]
-    S --> F
-    S --> P["Prompt + retrieved passages"]
-    P --> L["OpenRouter language model"]
-    L --> O["Answer + source references"]
-    O --> R
-    R --> G
+flowchart LR
+    UI["Django Admin / REST API"] --> DOC["DOCX validation + text extraction"]
+    DOC --> DB[("SQLite: documents + index state")]
+    DOC --> SPLIT["LangChain chunking"]
+    SPLIT --> E5["multilingual-e5-small embeddings"]
+    E5 --> CH[("ChromaDB vectors + metadata")]
+    ASK["POST /api/ask/"] --> RET["Retrieve current READY chunks"]
+    CH --> RET
+    RET --> LLM["Prompt + OpenRouter LLM"]
+    LLM --> ANS["Answer + source references"]
+    ANS --> HIST[("SQLite: per-user Q&A history")]
 ```
 
-### Main Components
+**Key design choices**
 
-- **Django / API:** Receives user requests, validates inputs, and coordinates services.
-- **Document service:** Handles file uploads, metadata, extracted text, and indexing lifecycle.
-- **Text processing:** Extracts text and splits it into overlapping chunks.
-- **Embedding service:** Converts documents and queries into vectors using the same model.
-- **Vector store:** Retrieves chunks that are semantically close to the question.
-- **RAG service:** Builds a prompt from retrieved chunks and calls the language model.
-- **History storage:** Records questions, answers, source references, and timestamps.
+- **Local embeddings, hosted generation:** E5 embeddings run locally (CPU), while OpenRouter handles LLM inference. The embedding model is not fine-tuned on uploaded documents.
+- **Separate operational and semantic storage:** SQLite stores source documents and application state; ChromaDB stores searchable vectors.
+- **Index-state awareness:** only vectors belonging to the current `READY` document index are eligible for retrieval. Failed operations can be retried without uploading the document again.
+- **Avoid unnecessary computation:** changing only document metadata does not require regenerating all embeddings; replacing changed content does.
+- **Explicit service boundaries:** document lifecycle, DOCX parsing, chunking, embeddings, vector search, RAG, and HTTP views are kept in separate modules.
 
-The components are intended to remain small and replaceable. For example, the embedding model or language-model provider can be changed without rewriting Django models or API endpoints.
+## Technology stack
 
-## Getting Started
+| Layer | Technologies |
+| --- | --- |
+| Backend & API | Python 3.11, Django 5.2, Django REST Framework |
+| Document ingestion | `python-docx` |
+| RAG & text splitting | LangChain |
+| Local embedding | `intfloat/multilingual-e5-small`, Sentence Transformers |
+| Vector database | ChromaDB |
+| LLM inference | OpenRouter (configurable model) |
+| Data & history | SQLite |
+| Environment | Docker, Docker Compose |
+| Testing & evaluation | Django test framework, mocked external dependencies, Persian evaluation fixtures, CSV/JSON reports |
 
-### Prerequisites
+## Run locally
 
-- **Docker Desktop** with Docker Compose (recommended), **or** Python 3.11 for local installation.
-- Git (optional, for cloning the repository).
-- An OpenRouter API key **when the LLM integration is enabled**.
-- Internet connectivity for the hosted language model and any first-time model downloads.
-
-### Option A — Run with Docker (recommended)
-
-Clone the repository, or open its extracted project folder:
-
-```powershell
-git clone https://github.com/<YOUR_USERNAME>/<YOUR_REPOSITORY>.git
-cd <YOUR_REPOSITORY>
-```
-
-If you already have the project folder locally, skip the cloning step.
-
-Create a local environment file:
+**Prerequisites:** Docker Desktop / Docker Compose, and an OpenRouter API key to generate answers. Internet access is needed for initial embedding-model download and LLM requests.
 
 ```powershell
+# From the repository root (containing manage.py)
 Copy-Item .env.example .env
 ```
 
-Review the settings in `.env`, then start the application:
-
-```powershell
-docker compose up --build -d
-```
-
-Create a Django administrator account:
-
-```powershell
-docker compose exec web python manage.py createsuperuser
-```
-
-Open:
-
-- **Django Admin:** <http://127.0.0.1:8000/admin/>
-- **Health check:** <http://127.0.0.1:8000/health/>
-
-Useful commands:
-
-```powershell
-docker compose ps
-docker compose logs -f web
-docker compose exec web python manage.py check
-docker compose exec web python manage.py test
-docker compose down
-```
-
-`docker compose down` stops the stack without deleting named volumes. **Do not run `docker compose down -v` unless you intentionally want to delete persistent volume data.**
-
-> **Development setup:** The Compose configuration uses Django's development server and binds port 8000 to localhost. It is not a production deployment configuration.
-
-### Option B — Run Locally on Windows (PowerShell)
-
-From the repository root:
-
-```powershell
-py -3.11 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-Copy-Item .env.example .env
-.\.venv\Scripts\python.exe manage.py migrate
-.\.venv\Scripts\python.exe manage.py createsuperuser
-.\.venv\Scripts\python.exe manage.py runserver
-```
-
-Visit <http://127.0.0.1:8000/admin/>. To stop the development server, press `Ctrl+C`.
-
-### Environment Configuration
-
-The environment file is local to your machine and must **never** be committed to Git.
-
-| Variable | Role | Status |
-| --- | --- | --- |
-| `DJANGO_SECRET_KEY` | Secret used by Django | Required now |
-| `DJANGO_DEBUG` | Enable/disable Django debug mode | Available now |
-| `DJANGO_ALLOWED_HOSTS` | Allowed HTTP hostnames | Available now |
-| `DJANGO_DB_PATH` | SQLite database path | Optional; used by Docker |
-| `OPENROUTER_API_KEY` | Authenticate with OpenRouter | Planned for LLM integration |
-| `OPENROUTER_MODEL` | Select the LLM at runtime | Planned for LLM integration |
-
-The current `.env.example` contains Django settings. Add the OpenRouter variables when the integration is implemented; do not assume they are recognized by the current code yet.
-
-A possible future addition to `.env` is:
+Set the appropriate values in your local `.env` (never commit it):
 
 ```dotenv
-# Add only after the OpenRouter integration is implemented.
-OPENROUTER_API_KEY=your-api-key-here
-OPENROUTER_MODEL=your-selected-model-id
+DJANGO_SECRET_KEY=replace-with-a-unique-secret
+DJANGO_DEBUG=True
+DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1
+OPENROUTER_API_KEY=your-private-key
+OPENROUTER_MODEL=your-available-openrouter-model
 ```
 
-Keep `.env` out of version control; commit `.env.example` with non-sensitive placeholders instead.
+```powershell
+docker compose up -d --build
+docker compose exec web python manage.py migrate
+docker compose exec web python manage.py createsuperuser
+docker compose exec web python manage.py check
+```
 
-## Proposed API
+Open **Django Admin** at `http://127.0.0.1:8000/admin/` or the **Browsable API** at `http://127.0.0.1:8000/api/documents/`. Upload a DOCX document; when its `index_status` becomes `ready`, it can be queried without running a separate indexing command.
 
-The following endpoints describe the **target interface**. Endpoints may not be available until their corresponding features are implemented.
+> The Compose configuration is designed for a local demo. Before using real/private documents, review access controls, remote LLM data transfer, persistent storage, and backup settings.
+
+## API endpoints
+
+All document and question endpoints below use Django authentication (session or HTTP Basic). **The current MVP uses `IsAuthenticated` for document CRUD and retry-index**: any authenticated user can manage the shared document collection. There is no custom staff-only permission policy in this version. Question history is filtered to the current user.
 
 | Method | Endpoint | Purpose |
 | --- | --- | --- |
-| `GET` | `/api/documents/` | List uploaded documents |
-| `POST` | `/api/documents/` | Upload a Word document |
-| `GET` | `/api/documents/{id}/` | Get document details |
-| `PATCH` | `/api/documents/{id}/` | Update document metadata or file |
-| `DELETE` | `/api/documents/{id}/` | Delete a document and its search index entries |
-| `POST` | `/api/ask/` | Ask a question about the uploaded documents |
-| `GET` | `/api/history/` | List saved questions and answers |
-| `GET` | `/api/history/{id}/` | Get an individual Q&A record |
-| `GET` | `/health/` | Application health check |
+| `GET`, `POST` | `/api/documents/` | List or upload documents |
+| `GET`, `PATCH`, `DELETE` | `/api/documents/{id}/` | View, edit, replace, or delete a document |
+| `POST` | `/api/documents/{id}/retry-index/` | Retry a failed/incomplete index |
+| `POST` | `/api/ask/` | Ask a question over indexed documents |
+| `GET` | `/api/history/` | Read paginated question history for the signed-in user |
+| `GET` | `/api/history/{id}/` | Read one of the user's history entries |
+| `GET` | `/health/` | Basic health endpoint |
 
-### Example: Upload a Document
-
-*Illustrative request for the planned API:*
-
-```bash
-curl -X POST http://127.0.0.1:8000/api/documents/ \
-  -F "title=Introduction to AI" \
-  -F "file=@sample.docx"
-```
-
-### Example: Ask a Question
-
-*Illustrative request for the planned API:*
-
-```bash
-curl -X POST http://127.0.0.1:8000/api/ask/ \
-  -H "Content-Type: application/json" \
-  -d '{"question":"What is deep learning?"}'
-```
-
-*Illustrative response schema (subject to implementation):*
+Example request to `POST /api/ask/`:
 
 ```json
 {
-  "answer": "Deep learning is a subset of machine learning ...",
-  "sources": [
-    {
-      "document_id": 1,
-      "title": "Introduction to AI",
-      "chunk_id": "example-chunk-id"
-    }
-  ]
+  "question": "موضوع اصلی سند چیست؟",
+  "k": 4,
+  "document_id": 7
 }
 ```
 
-Responses should not invent supporting citations. If retrieval does not provide sufficient evidence, the system should explain that it cannot answer reliably from the available documents.
+`document_id` is optional; omit it to search across all `READY` documents. The answer response includes `question`, `answer`, and `sources`. Document upload uses `multipart/form-data` with `title` and `file` fields (`.docx` only; the API validates file type and size).
 
-## How Retrieval Works
+**Why does `GET /api/documents/7/retry-index/` return 405?** The endpoint is a custom Django REST Framework action declared with `@action(detail=True, methods=["post"], url_path="retry-index")` on `DocumentViewSet`. The router creates its URL automatically; retrying is an operation, not a page to retrieve.
 
-**Document ingestion** happens when a file is uploaded or updated:
+## Testing & quality evaluation
 
-`DOCX -> extracted text -> text chunks -> embeddings -> ChromaDB`
-
-**Question answering** happens for each query:
-
-`question -> query embedding -> relevant chunks -> prompt -> LLM -> answer + sources`
-
-For the planned multilingual E5 embedding model, the implementation should use `passage:` prefixes for indexed passages and `query:` prefixes for questions. Chunk size, overlap, and retrieval count should be configurable and evaluated against example documents instead of assumed optimal.
-
-On document updates or deletion, corresponding vector records must also be updated or removed to prevent stale search results.
-
-## Testing and Quality Checks
-
-Run the current Django test suite locally:
+Run the project's Django tests:
 
 ```powershell
-.\.venv\Scripts\python.exe manage.py check
-.\.venv\Scripts\python.exe manage.py test
-```
-
-Or with Docker:
-
-```powershell
-docker compose exec web python manage.py check
 docker compose exec web python manage.py test
 ```
 
-The full test plan should cover:
+Run local report-helper tests if `scripts/` has been added to your checkout:
 
-- Document create, read, update, and delete operations.
-- DOCX extension and content validation; empty or corrupted documents.
-- Accurate extraction of text and tables where supported.
-- Vector indexing, retrieval, and cleanup after document changes.
-- Answer grounding, relevant source references, and no-evidence responses.
-- Persisted Q&A history and appropriate API status codes.
-- OpenRouter timeouts, rate limits, and unavailable models.
-- Data persistence after restarting the Docker containers.
-
-A model-generated answer may sound convincing while being unsupported. Evaluate answers against the actual source passages, not fluency alone.
-
-## Security and Data Handling
-
-- Do **not** commit `.env`, API keys, SQLite databases, uploaded documents, or vector-store files.
-- Protect document and Q&A endpoints with appropriate authentication before exposing the service publicly.
-- Validate actual DOCX contents, not only the filename extension; enforce upload-size limits.
-- Treat document text as **untrusted content**. Documents should not be able to override application instructions or reveal secrets.
-- Avoid sending private or sensitive documents to external LLM providers without appropriate permission and data-handling review.
-- Use `DJANGO_DEBUG=False`, a strong secret key, secure hosts, and a production server for any real deployment.
-- Docker volumes preserve application data across ordinary container restarts; maintain backups if persistence matters.
-
-## Project Structure
-
-The current Django foundation and intended extensions follow this layout:
-
-```text
-document_qa/
-├── config/                 # Django project settings and URL routing
-├── documents/              # Document models, Admin, APIs, tests
-│   ├── migrations/
-│   └── services/           # Planned: extraction, indexing, retrieval, RAG
-├── manage.py
-├── requirements.txt
-├── Dockerfile
-├── compose.yaml
-├── .dockerignore
-├── .env.example
-├── .gitignore
-└── README.md
+```powershell
+python -m unittest discover -s scripts/tests -v
 ```
 
-`media/`, the SQLite database, local embedding caches, and ChromaDB storage are runtime data and should not be published in the Git repository.
+An optional evaluation pipeline uses **two synthetic Persian DOCX documents** (`quality_eval/aban.docx`, `quality_eval/narvan.docx`) and **16 labeled Persian questions**. After uploading them and noting their document IDs:
 
-## Current Scope and Limitations
+```powershell
+# Retrieval-only: no OpenRouter calls
+# Replace 7 and 8 with the actual uploaded IDs.
+docker compose exec web python manage.py evaluate_rag_quality --document-a 7 --document-b 8 --k 4
 
-The intended initial release is a **single-instance, document-focused prototype**, not an enterprise document-search platform.
-
-- Input format: `.docx` (not PDF, scanned images, or arbitrary office formats).
-- The quality of retrieval depends on document structure, chunking, and the embedding model.
-- Text extraction may not preserve complex Word layouts, charts, or embedded images.
-- LLM responses can be incomplete or incorrect, even when supplied with relevant context.
-- Hosted LLM access needs network connectivity and may be affected by rate limits or model availability.
-- SQLite and local ChromaDB are appropriate for development and demos; scaling to many concurrent users may require different infrastructure.
-- The Docker setup targets local development; production deployment requires additional hardening.
-
-## Development Priorities
-
-1. **Functional path:** Upload DOCX, index its contents, ask a question, receive a source-grounded answer.
-2. **Complete system:** Document APIs, history, source references, and consistent index updates.
-3. **Quality and delivery:** Stronger retrieval, error handling, automated tests, documentation, and reproducible demos.
-
-This sequence intentionally keeps the project demonstrable as features are added, rather than postponing the core workflow until the end.
-
-## Contributing and Git History
-
-Keep changes focused, readable, and testable. Use descriptive commits, for example:
-
-```text
-chore: initialize Django project
-chore(docker): add Docker development setup
-feat(documents): add Document model
-feat(admin): add document management
-feat(documents): extract text from DOCX files
-feat(rag): implement document-grounded question answering
-test: cover document and RAG workflows
-docs: update API and setup documentation
+# Optional live answer evaluation: consumes LLM quota
+docker compose exec web python manage.py evaluate_rag_quality --document-a 7 --document-b 8 --k 4 --with-llm
 ```
 
-Before committing, review `git status` and verify that no secrets or uploaded data are staged.
+The evaluation records retrieval hits, evidence matches, citation-number checks, response latency, provider errors, and answers for human review. If the quality-summary helper is present, it can convert the JSON report and graded CSV into a Markdown summary.
 
-## License
+**Observed small-sample result (project-owner manual review):** 15 of 16 prompts received answers and all 15 received answers were rated correct; one prompt failed because of an external provider error. This is **15/15 among completed responses**, **15/16 request completion**, and **not a claim of 100% general accuracy**. Retrieval metrics, citation support, and performance should be taken from the actual evaluation reports rather than inferred from this observation.
 
-No license has been assigned yet. Public availability on GitHub does **not** automatically grant permission to reuse, modify, or redistribute this project. Add a `LICENSE` file when a license is chosen.
+## Engineering skills demonstrated
+
+This project demonstrates practical experience with:
+
+- Designing and testing **REST APIs** with serializers, authentication, pagination, and structured errors.
+- Building a complete **RAG ingestion/retrieval/generation pipeline** rather than only calling an LLM API.
+- Integrating **local embedding inference** and a persistent vector store with a traditional database.
+- Handling **partial failures** across SQLite, ChromaDB, and an external inference provider through indexing states, retries, and controlled error responses.
+- Writing **unit/integration tests**, including mocked external services and test-only vector stores.
+- Running a **reproducible Docker-based development environment** and measuring model quality separately from provider availability.
+
+## Scope and trade-offs
+
+- **Shared documents:** authenticated users can currently view and modify the same corpus. Granular write permissions or per-user document ownership would be needed for an untrusted multi-user deployment.
+- **Hosted LLM:** selected retrieved passages are sent to OpenRouter; do not upload confidential information without a suitable data policy.
+- **Availability:** free LLM providers can return `429` rate limits or `504` timeouts; these failures are not evidence of incorrect semantic retrieval.
+- **Processing cost:** embeddings run synchronously on CPU, so large uploads may be slow.
+- **Consistency:** SQLite and ChromaDB have no cross-database atomic transaction. Index status, version filtering, and retry mitigate some failure cases but are not a full distributed transaction.
+- **Deployment:** local Docker setup uses development-oriented settings; public deployment needs hardened authentication/permissions, HTTPS, production hosting, logging, and backup/restore procedures.
+
+**Possible next iterations (not yet implemented):** asynchronous indexing jobs, document-level authorization, larger multilingual evaluation datasets, retrieval reranking, production monitoring, and optimized embedding inference.
+
+---
+
+*Developed as a practical AI engineering internship assignment, focusing on end-to-end delivery, correctness, and maintainability rather than adding unnecessary infrastructure.*
