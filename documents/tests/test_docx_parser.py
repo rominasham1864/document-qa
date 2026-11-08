@@ -5,7 +5,7 @@ from io import BytesIO
 from django.test import SimpleTestCase
 from docx import Document as WordDocument
 
-from .services.docx_parser import DocumentExtractionError, extract_docx_text
+from documents.services.docx_parser import DocumentExtractionError, extract_docx_text
 
 
 class DocxParserTests(SimpleTestCase):

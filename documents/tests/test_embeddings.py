@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 from django.test import SimpleTestCase
 
-from .services.embeddings import E5Embeddings
+from documents.services.embeddings import E5Embeddings
 
 
 class _FakeArray:

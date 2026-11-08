@@ -10,7 +10,7 @@ from django.urls import reverse
 from documents.models import Document
 from documents.services.document_lifecycle import index_saved_document
 from documents.services.vector_store import search_chunks
-from documents.test_document_auto_index import AutomaticIndexTests, upload_docx
+from .test_document_auto_index import AutomaticIndexTests, upload_docx
 
 
 class IndexReliabilityTests(AutomaticIndexTests):

@@ -10,7 +10,7 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 from docx import Document as WordDocument
 
-from .models import Document
+from documents.models import Document
 
 
 def make_word_upload(filename, paragraph):

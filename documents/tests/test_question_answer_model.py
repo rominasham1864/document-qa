@@ -3,7 +3,7 @@
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 
-from .models import Document, QuestionAnswer
+from documents.models import Document, QuestionAnswer
 
 
 class QuestionAnswerModelTests(TestCase):

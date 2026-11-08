@@ -3,7 +3,7 @@
 from django.core.exceptions import ValidationError
 from django.test import TestCase
 
-from .models import Document
+from documents.models import Document
 
 
 class DocumentModelTests(TestCase):

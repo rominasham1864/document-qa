@@ -2,7 +2,7 @@
 
 from django.test import SimpleTestCase
 
-from .services.chunking import split_document_text
+from documents.services.chunking import split_document_text
 
 
 class ChunkingTests(SimpleTestCase):
