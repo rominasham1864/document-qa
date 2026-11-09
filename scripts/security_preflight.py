@@ -16,7 +16,10 @@ IGNORED_EXAMPLE_NAMES = {".env.example", ".env.sample", ".env.template"}
 SENSITIVE_DIRS = {"media", "chroma_data", "staticfiles", "data", "hf_models"}
 SENSITIVE_SUFFIXES = {".sqlite3", ".db", ".pem", ".p12", ".pfx", ".key"}
 SENSITIVE_REPORTS = {"rag_quality_report.json", "rag_quality_review.csv"}
-
+PUBLIC_REPORT_PATHS = {
+    "quality_eval/rag_quality_report.json",
+    "quality_eval/rag_quality_review.csv",
+}
 
 def sensitive_reason(path: str) -> str | None:
     normalized = path.replace("\\", "/").strip("/")
@@ -30,7 +33,7 @@ def sensitive_reason(path: str) -> str | None:
         return "environment secrets file"
     if any(part.lower() in SENSITIVE_DIRS for part in parts[:-1]):
         return "runtime data/model storage"
-    if name in SENSITIVE_REPORTS:
+    if name in SENSITIVE_REPORTS and normalized not in PUBLIC_REPORT_PATHS:
         return "generated report could contain private documents and answers"
     if any(name.endswith(suffix) for suffix in SENSITIVE_SUFFIXES):
         return "credential, private key, or database file"
